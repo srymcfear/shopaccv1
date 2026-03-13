@@ -86,9 +86,9 @@ body{margin:0;background:#000;font-family:Arial}
     <div class="stats" id="stats">0 ảnh</div>
   </div>
 
-  <div class="hint" id="folderHint">
+  <!-- <div class="hint" id="folderHint">
     Nếu mở HTML qua web server, danh sách sẽ tự dò các file <code>.txt</code> trong cùng thư mục và đưa vào dropdown. Nếu mở trực tiếp bằng file:// thì trình duyệt thường chặn việc đọc danh sách thư mục, khi đó bạn vẫn dùng nút <b>Tải file TXT</b> bình thường.
-  </div>
+  </div> -->
 
   <div class="tabs">
     <div class="tab active" data-type="all">Tất cả</div>
@@ -278,7 +278,7 @@ async function detectTxtFiles(){
       if(Array.isArray(data)){
         const files = data.filter(name => typeof name === 'string' && /\.txt$/i.test(name))
         populateSelect(files)
-        folderHint.innerHTML = `Đã nhận diện <b>${files.length}</b> file TXT trong thư mục <code>account/</code> qua danh sách <code>${file}</code>.`
+        // folderHint.innerHTML = `Đã nhận diện <b>${files.length}</b> file TXT trong thư mục <code>account/</code> qua danh sách <code>${file}</code>.`
         return
       }
     }catch(err){}
@@ -286,7 +286,7 @@ async function detectTxtFiles(){
 
   if(location.protocol === 'file:'){
     populateSelect([])
-    folderHint.innerHTML = 'Bạn đang mở bằng <code>file://</code>, trình duyệt không cho web tự quét thư mục. Muốn dropdown tự hiện danh sách file TXT, hãy mở HTML bằng web server và đặt cạnh một file <code>files.json</code> chứa mảng tên file, ví dụ: <code>["a.txt","b.txt"]</code>.'
+    // folderHint.innerHTML = 'Bạn đang mở bằng <code>file://</code>, trình duyệt không cho web tự quét thư mục. Muốn dropdown tự hiện danh sách file TXT, hãy mở HTML bằng web server và đặt cạnh một file <code>files.json</code> chứa mảng tên file, ví dụ: <code>["a.txt","b.txt"]</code>.'
     return
   }
 
@@ -300,9 +300,9 @@ async function detectTxtFiles(){
     populateSelect(unique)
 
     if(unique.length){
-      folderHint.innerHTML = `Đã tự dò thấy <b>${unique.length}</b> file TXT trong cùng thư mục.`
+      // folderHint.innerHTML = `Đã tự dò thấy <b>${unique.length}</b> file TXT trong cùng thư mục.`
     }else{
-      folderHint.innerHTML = 'Không tự dò thấy file TXT trong thư mục <code>account/</code>. Bạn vẫn có thể dùng nút <b>Tải file TXT</b>, hoặc đặt file <code>account/files.json</code> để dropdown hiện danh sách chắc chắn hơn.'
+      // folderHint.innerHTML = 'Không tự dò thấy file TXT trong thư mục <code>account/</code>. Bạn vẫn có thể dùng nút <b>Tải file TXT</b>, hoặc đặt file <code>account/files.json</code> để dropdown hiện danh sách chắc chắn hơn.'
     }
   }catch(err){
     populateSelect([])
