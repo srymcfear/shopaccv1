@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image List</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#000;font-family:Arial}
+.container{max-width:100%;margin:auto;padding:8px}
+
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;position:sticky;top:0;background:#000;padding:8px 0;z-index:10;flex-wrap:wrap}
+
+.controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.upload{background:#111;border:1px solid #333;color:#fff;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
+.upload input{display:none}
+
+.selectbox{
+  background:#111;
+  border:1px solid #333;
+  color:#fff;
+  padding:8px 12px;
+  border-radius:6px;
+  font-size:13px;
+  min-width:220px;
+}
+
+.stats{color:#888;font-size:13px}
+
+.tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tab{
+ background:#111;
+ border:1px solid #333;
+ color:#aaa;
+ padding:6px 10px;
+ border-radius:6px;
+ cursor:pointer;
+ font-size:13px;
+}
+.tab.active{
+ background:#1f1f1f;
+ color:#fff;
+ border-color:#555;
+}
+
+.grid{
+ display:grid;
+ grid-template-columns:repeat(auto-fill,192px);
+ justify-content:center;
+ gap:6px;
+}
+
+.card{background:#000;border:1px solid #1a1a1a;content-visibility:auto;contain-intrinsic-size:280px}
+
+.thumb{width:200px;height:370px;overflow:hidden;background:#050505}
+
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+
+.fallback{display:none;align-items:center;justify-content:center;height:100%;color:#777;font-size:11px}
+
+.hint{color:#666;font-size:12px;margin-bottom:10px;line-height:1.5}
+
+@media (max-width:640px){
+ .grid{grid-template-columns:repeat(auto-fill,140px)}
+ .thumb{width:140px;height:204px}
+ .selectbox{min-width:160px}
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="topbar">
+    <div class="controls">
+      <label class="upload">Tải file TXT
+        <input id="fileInput" type="file" accept=".txt,.html,.htm">
+      </label>
+
+      <select id="fileSelect" class="selectbox">
+        <option value="">Chọn file TXT trong thư mục account...</option>
+      </select>
+    </div>
+
+    <div class="stats" id="stats">0 ảnh</div>
+  </div>
+
+  <div class="hint" id="folderHint">
+    Nếu mở HTML qua web server, danh sách sẽ tự dò các file <code>.txt</code> trong cùng thư mục và đưa vào dropdown. Nếu mở trực tiếp bằng file:// thì trình duyệt thường chặn việc đọc danh sách thư mục, khi đó bạn vẫn dùng nút <b>Tải file TXT</b> bình thường.
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-type="all">Tất cả</div>
+    <div class="tab" data-type="skin">Skin</div>
+    <div class="tab" data-type="pet">Pet</div>
+    <div class="tab" data-type="info">Thông tin</div>
+  </div>
+
+  <div id="gallery" class="grid"></div>
+
+</div>
+
+<script>
+const fileInput = document.getElementById('fileInput')
+const fileSelect = document.getElementById('fileSelect')
+const stats = document.getElementById('stats')
+const gallery = document.getElementById('gallery')
+const tabs = document.querySelectorAll('.tab')
+const folderHint = document.getElementById('folderHint')
+
+const ITEM_WIDTH = 192
+const ITEM_HEIGHT = 280
+const CHUNK_SIZE = 24
+
+let allItems = []
+let filteredItems = []
+let renderedCount = 0
+let currentFilter = 'all'
+
+let io = null
+let sentinel = null
+let autoDetectedFiles = []
+
+function parseItems(text){
+  if(!text) return []
+
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+
+  return lines
+    .filter(url => /^https?:\/\//i.test(url) || url.startsWith('/'))
+    .map((url,i)=>{
+      const full = /^https?:\/\//i.test(url)
+        ? url
+        : 'https://lienminhshop.vn' + url
+
+      let type = 'other'
+      if(full.includes('/skinsid/')) type='skin'
+      else if(full.includes('/petowned/')) type='pet'
+      else if(full.includes('acc-')) type='info'
+
+      return { src:full, id:i, type }
+    })
+}
+
+function createCard(item){
+  const card=document.createElement('div')
+  card.className='card'
+
+  const thumb=document.createElement('div')
+  thumb.className='thumb'
+
+  const img=document.createElement('img')
+  img.loading='lazy'
+  img.decoding='async'
+  img.alt=''
+  img.width=ITEM_WIDTH
+  img.height=ITEM_HEIGHT
+  img.src=item.src
+
+  const fallback=document.createElement('div')
+  fallback.className='fallback'
+  fallback.textContent='error'
+
+  img.onerror=()=>{
+    img.style.display='none'
+    fallback.style.display='flex'
+  }
+
+  thumb.appendChild(img)
+  thumb.appendChild(fallback)
+  card.appendChild(thumb)
+  return card
+}
+
+function ensureSentinel(){
+  if(sentinel) sentinel.remove()
+  sentinel=document.createElement('div')
+  sentinel.style.height='1px'
+  sentinel.style.gridColumn='1 / -1'
+  gallery.appendChild(sentinel)
+
+  if(io) io.disconnect()
+  io=new IntersectionObserver((entries)=>{
+    if(entries[0] && entries[0].isIntersecting) appendNextChunk()
+  },{rootMargin:'1200px 0px'})
+
+  io.observe(sentinel)
+}
+
+function appendNextChunk(){
+  if(renderedCount>=filteredItems.length){
+    stats.textContent=filteredItems.length+' ảnh'
+    if(io) io.disconnect()
+    if(sentinel) sentinel.remove()
+    return
+  }
+
+  const end=Math.min(renderedCount+CHUNK_SIZE,filteredItems.length)
+  const frag=document.createDocumentFragment()
+
+  for(let i=renderedCount;i<end;i++) frag.appendChild(createCard(filteredItems[i]))
+
+  if(sentinel && sentinel.parentNode) gallery.insertBefore(frag,sentinel)
+  else gallery.appendChild(frag)
+
+  renderedCount=end
+  stats.textContent=renderedCount+'/'+filteredItems.length+' ảnh'
+}
+
+function applyFilter(){
+  if(currentFilter==='all') filteredItems=[...allItems]
+  else filteredItems=allItems.filter(i=>i.type===currentFilter)
+
+  renderedCount=0
+  gallery.innerHTML=''
+
+  if(io) io.disconnect()
+  sentinel=null
+
+  if(!filteredItems.length){
+    stats.textContent='0 ảnh'
+    return
+  }
+
+  ensureSentinel()
+  appendNextChunk()
+}
+
+function render(list){
+  allItems=list
+  applyFilter()
+}
+
+async function loadTextContent(text){
+  const items=parseItems(text)
+  render(items)
+}
+
+async function loadTxtFromUrl(url){
+  stats.textContent='Đang đọc file...'
+  const res = await fetch(url)
+  if(!res.ok) throw new Error('Không đọc được file: ' + url)
+  const text = await res.text()
+  await loadTextContent(text)
+}
+
+function populateSelect(files){
+  autoDetectedFiles = files.slice()
+  fileSelect.innerHTML = ''
+
+  const placeholder = document.createElement('option')
+  placeholder.value = ''
+  placeholder.textContent = files.length
+    ? `Chọn file TXT trong cùng thư mục (${files.length} file)`
+    : 'Không tự dò được file TXT'
+  fileSelect.appendChild(placeholder)
+
+  files.forEach(name => {
+    const option = document.createElement('option')
+    option.value = name
+    option.textContent = name
+    fileSelect.appendChild(option)
+  })
+}
+
+async function detectTxtFiles(){
+  const candidates = ['account/files.json']
+
+  for(const file of candidates){
+    try{
+      const res = await fetch(file, { cache:'no-store' })
+      if(!res.ok) continue
+      const data = await res.json()
+      if(Array.isArray(data)){
+        const files = data.filter(name => typeof name === 'string' && /\.txt$/i.test(name))
+        populateSelect(files)
+        folderHint.innerHTML = `Đã nhận diện <b>${files.length}</b> file TXT trong thư mục <code>account/</code> qua danh sách <code>${file}</code>.`
+        return
+      }
+    }catch(err){}
+  }
+
+  if(location.protocol === 'file:'){
+    populateSelect([])
+    folderHint.innerHTML = 'Bạn đang mở bằng <code>file://</code>, trình duyệt không cho web tự quét thư mục. Muốn dropdown tự hiện danh sách file TXT, hãy mở HTML bằng web server và đặt cạnh một file <code>files.json</code> chứa mảng tên file, ví dụ: <code>["a.txt","b.txt"]</code>.'
+    return
+  }
+
+  try{
+    const res = await fetch('.', { cache:'no-store' })
+    if(!res.ok) throw new Error('No index')
+    const html = await res.text()
+    const links = [...html.matchAll(/href=["']([^"']+\.txt)["']/gi)].map(m => decodeURIComponent(m[1]))
+    const unique = [...new Set(links.filter(Boolean))]
+
+    populateSelect(unique)
+
+    if(unique.length){
+      folderHint.innerHTML = `Đã tự dò thấy <b>${unique.length}</b> file TXT trong cùng thư mục.`
+    }else{
+      folderHint.innerHTML = 'Không tự dò thấy file TXT trong thư mục <code>account/</code>. Bạn vẫn có thể dùng nút <b>Tải file TXT</b>, hoặc đặt file <code>account/files.json</code> để dropdown hiện danh sách chắc chắn hơn.'
+    }
+  }catch(err){
+    populateSelect([])
+    folderHint.innerHTML = 'Không thể tự quét thư mục trong môi trường hiện tại. Bạn vẫn có thể dùng nút <b>Tải file TXT</b>, hoặc đặt file <code>account/files.json</code> với nội dung như <code>["a.txt","b.txt"]</code> để dropdown hoạt động ổn định.'
+  }
+}
+
+fileInput.addEventListener('change', async (e)=>{
+  const file=e.target.files && e.target.files[0]
+  if(!file) return
+
+  stats.textContent='Đang đọc file...'
+  const text=await file.text()
+  stats.textContent='Đang xử lý...'
+
+  requestAnimationFrame(()=> loadTextContent(text))
+})
+
+fileSelect.addEventListener('change', async ()=>{
+  const value = fileSelect.value
+  if(!value) return
+
+  try{
+    const url = value.startsWith('account/') ? value : ('account/' + value)
+    await loadTxtFromUrl(url)
+  }catch(err){
+    stats.textContent='Lỗi đọc file'
+    console.error(err)
+  }
+})
+
+tabs.forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    tabs.forEach(t=>t.classList.remove('active'))
+    tab.classList.add('active')
+    currentFilter=tab.dataset.type
+    applyFilter()
+  })
+})
+
+detectTxtFiles()
+
+</script>
+
+</body>
+</html>
